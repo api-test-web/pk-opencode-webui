@@ -55,7 +55,7 @@ data_dir=/var/lib/opencode-webui
 install -d "$app_dir" "$data_dir/workspace"
 
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git tar
+DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git tar util-linux
 
 if ! id opencode >/dev/null 2>&1; then
   useradd --system --user-group --create-home --home-dir /var/lib/opencode-webui \
@@ -152,23 +152,36 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable --now opencode-api.service opencode-webui.service opencode-tunnel.service
-
 echo "Waiting for the Cloudflare quick-tunnel URL..." >&2
 url=
-for _ in $(seq 1 60); do
-  url=$(journalctl -u opencode-tunnel.service --no-pager -n 100 \
-    | grep -oE 'https://[A-Za-z0-9.-]+\.trycloudflare\.com' \
-    | head -1 || true)
-  [ -n "$url" ] && break
-  sleep 2
-done
+if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+  systemctl daemon-reload
+  systemctl enable --now opencode-api.service opencode-webui.service opencode-tunnel.service
+  for _ in $(seq 1 60); do
+    url=$(journalctl -u opencode-tunnel.service --no-pager -n 100 \
+      | grep -oE 'https://[A-Za-z0-9.-]+\.trycloudflare\.com' \
+      | head -1 || true)
+    [ -n "$url" ] && break
+    sleep 2
+  done
+else
+  sh "$app_dir/scripts/vps-services.sh" start
+  for _ in $(seq 1 60); do
+    url=$(grep -oE 'https://[A-Za-z0-9.-]+\.trycloudflare\.com' \
+      "$data_dir/logs/tunnel.log" 2>/dev/null | head -1 || true)
+    [ -n "$url" ] && break
+    sleep 2
+  done
+fi
 
 if [ -z "$url" ]; then
-  echo "Tunnel URL did not appear. Check: journalctl -u opencode-tunnel.service -n 100" >&2
+  echo "Tunnel URL did not appear. Check the cloudflared service or its log." >&2
   exit 1
 fi
 
 printf '%s\n' "$url"
-echo "Services installed. Check them with: systemctl status opencode-api opencode-webui opencode-tunnel" >&2
+if [ -d /run/systemd/system ]; then
+  echo "Services installed. Check them with: systemctl status opencode-api opencode-webui opencode-tunnel" >&2
+else
+  echo "Services started. Manage them with: sudo sh $app_dir/scripts/vps-services.sh status|stop|start" >&2
+fi
