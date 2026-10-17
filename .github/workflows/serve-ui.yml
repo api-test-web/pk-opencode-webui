@@ -85,6 +85,14 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "$URL" >> "$GITHUB_STEP_SUMMARY"
           echo "PUBLIC_URL=$URL" >> "$GITHUB_ENV"
+          printf '%s\n' "$URL" > /tmp/tunnel-url.txt
+
+      - name: Publish tunnel URL
+        uses: actions/upload-artifact@v4
+        with:
+          name: tunnel-url
+          path: /tmp/tunnel-url.txt
+          retention-days: 1
 
       - name: Keep alive
         run: |

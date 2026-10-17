@@ -56,7 +56,24 @@ if [ -z "$run_id" ]; then
 fi
 
 echo "Watching workflow run $run_id..." >&2
+artifact_dir=$(mktemp -d ".serve-ui.XXXXXX")
+trap 'rm -rf "$artifact_dir"' EXIT
 for _ in $(seq 1 180); do
+  artifact_url=$(gh api \
+    "repos/$repo/actions/runs/$run_id/artifacts" \
+    --jq '.artifacts[] | select(.name == "tunnel-url" and .expired == false) | .archive_download_url' \
+    | head -1 || true)
+  if [ -n "$artifact_url" ]; then
+    gh api "$artifact_url" > "$artifact_dir/tunnel.zip" 2>/dev/null || true
+    url=$(unzip -p "$artifact_dir/tunnel.zip" tunnel-url.txt 2>/dev/null \
+      | grep -oE 'https://[A-Za-z0-9.-]+\.trycloudflare\.com' \
+      | head -1 || true)
+    if [ -n "$url" ]; then
+      printf '%s\n' "$url"
+      exit 0
+    fi
+  fi
+
   url=$(gh run view "$run_id" --repo "$repo" --log 2>/dev/null \
     | grep -oE 'https://[A-Za-z0-9.-]+\.trycloudflare\.com' \
     | head -1 || true)
